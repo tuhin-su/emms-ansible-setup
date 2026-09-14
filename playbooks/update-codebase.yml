@@ -6,7 +6,8 @@
       prompt: "Enter SSH password"
       private: true
   vars:
-    app_user: "ees"
+    app_user: "www-data"
+    app_user_home: "/var/www"
     project_root: "/var/www/ees"
 
   become: true
@@ -15,7 +16,7 @@
       ansible.builtin.git:
         repo: "git@github.com:snbhattacharjya/ees.git"
         dest: "{{ project_root }}"
-        key_file: "/home/{{ app_user }}/.ssh/id_rsa"
+        key_file: "{{ app_user_home }}/.ssh/id_rsa"
         accept_hostkey: yes
         update: yes
         force: yes

@@ -7,8 +7,9 @@
       private: true
   vars:
     php_version: "8.2"
-    app_user: "ees"
-    app_group: "ees"
+    app_user: "www-data"
+    app_group: "www-data"
+    app_user_home: "/var/www"
     project_root: "/var/www/ees"
     repo_url: "git@github.com:snbhattacharjya/ees.git"
     web_user: "{{ 'www-data' if ansible_os_family == 'Debian' else 'nginx' if ansible_os_family == 'RedHat' else 'http' }}"
@@ -139,18 +140,19 @@
         name: "{{ app_group }}"
         state: present
 
-    - name: Create App User
+    - name: Create App User and Generate SSH Key
       ansible.builtin.user:
         name: "{{ app_user }}"
         group: "{{ app_group }}"
         groups: "{{ web_user }}"
         append: yes
         shell: /bin/bash
+        home: "{{ app_user_home }}"
         create_home: yes
 
     - name: Ensure .ssh directory exists
       ansible.builtin.file:
-        path: "/home/{{ app_user }}/.ssh"
+        path: "{{ app_user_home }}/.ssh"
         state: directory
         owner: "{{ app_user }}"
         group: "{{ app_group }}"
@@ -173,7 +175,7 @@
     - name: Copy GitHub SSH Private Key from template
       ansible.builtin.copy:
         src: ../templates/git_id_rsa
-        dest: "/home/{{ app_user }}/.ssh/id_rsa"
+        dest: "{{ app_user_home }}/.ssh/id_rsa"
         owner: "{{ app_user }}"
         group: "{{ app_group }}"
         mode: "0600"
@@ -182,7 +184,7 @@
     - name: Copy GitHub SSH Public Key from template
       ansible.builtin.copy:
         src: ../templates/git_id_rsa.pub
-        dest: "/home/{{ app_user }}/.ssh/id_rsa.pub"
+        dest: "{{ app_user_home }}/.ssh/id_rsa.pub"
         owner: "{{ app_user }}"
         group: "{{ app_group }}"
         mode: "0644"
@@ -190,12 +192,12 @@
 
     - name: Check if SSH key already exists on target VM
       ansible.builtin.stat:
-        path: "/home/{{ app_user }}/.ssh/id_rsa"
+        path: "{{ app_user_home }}/.ssh/id_rsa"
       register: vm_ssh_key
       when: not local_ssh_key.stat.exists
 
     - name: Generate SSH Key on target VM if not provided in templates
-      ansible.builtin.command: ssh-keygen -t rsa -b 4096 -f /home/{{ app_user }}/.ssh/id_rsa -N ""
+      ansible.builtin.command: ssh-keygen -t rsa -b 4096 -f {{ app_user_home }}/.ssh/id_rsa -N ""
       become_user: "{{ app_user }}"
       when:
         - not local_ssh_key.stat.exists
@@ -203,7 +205,7 @@
 
     - name: Fetch generated SSH Public Key
       ansible.builtin.slurp:
-        src: "/home/{{ app_user }}/.ssh/id_rsa.pub"
+        src: "{{ app_user_home }}/.ssh/id_rsa.pub"
       register: ssh_pub_key
       when:
         - not local_ssh_key.stat.exists
@@ -231,7 +233,7 @@
 
     - name: Add GitHub to known_hosts
       ansible.builtin.known_hosts:
-        path: "/home/{{ app_user }}/.ssh/known_hosts"
+        path: "{{ app_user_home }}/.ssh/known_hosts"
         name: github.com
         key: "{{ lookup('pipe', 'ssh-keyscan -t rsa github.com') }}"
         state: present
@@ -252,7 +254,7 @@
       ansible.builtin.git:
         repo: "{{ repo_url }}"
         dest: "{{ project_root }}"
-        key_file: "/home/{{ app_user }}/.ssh/id_rsa"
+        key_file: "{{ app_user_home }}/.ssh/id_rsa"
         accept_hostkey: yes
         force: yes
       become_user: "{{ app_user }}"
