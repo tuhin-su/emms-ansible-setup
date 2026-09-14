@@ -132,14 +132,14 @@
       when: composer_check.rc != 0
 
     # ---------------------------------------------------------
-    # User Setup & SSH Key Generation
+    # User Setup & SSH Key Configuration
     # ---------------------------------------------------------
     - name: Create App Group
       ansible.builtin.group:
         name: "{{ app_group }}"
         state: present
 
-    - name: Create App User and Generate SSH Key
+    - name: Create App User
       ansible.builtin.user:
         name: "{{ app_user }}"
         group: "{{ app_group }}"
@@ -147,14 +147,67 @@
         append: yes
         shell: /bin/bash
         create_home: yes
-        generate_ssh_key: yes
-        ssh_key_bits: 2048
-        ssh_key_file: .ssh/id_rsa
+
+    - name: Ensure .ssh directory exists
+      ansible.builtin.file:
+        path: "/home/{{ app_user }}/.ssh"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0700"
+
+    - name: Check if local SSH private key template exists
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../templates/git_id_rsa"
+      register: local_ssh_key
+      delegate_to: localhost
+      become: false
+
+    - name: Check if local SSH public key template exists
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../templates/git_id_rsa.pub"
+      register: local_ssh_pub_key
+      delegate_to: localhost
+      become: false
+
+    - name: Copy GitHub SSH Private Key from template
+      ansible.builtin.copy:
+        src: ../templates/git_id_rsa
+        dest: "/home/{{ app_user }}/.ssh/id_rsa"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0600"
+      when: local_ssh_key.stat.exists
+
+    - name: Copy GitHub SSH Public Key from template
+      ansible.builtin.copy:
+        src: ../templates/git_id_rsa.pub
+        dest: "/home/{{ app_user }}/.ssh/id_rsa.pub"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0644"
+      when: local_ssh_pub_key.stat.exists
+
+    - name: Check if SSH key already exists on target VM
+      ansible.builtin.stat:
+        path: "/home/{{ app_user }}/.ssh/id_rsa"
+      register: vm_ssh_key
+      when: not local_ssh_key.stat.exists
+
+    - name: Generate SSH Key on target VM if not provided in templates
+      ansible.builtin.command: ssh-keygen -t rsa -b 4096 -f /home/{{ app_user }}/.ssh/id_rsa -N ""
+      become_user: "{{ app_user }}"
+      when:
+        - not local_ssh_key.stat.exists
+        - not vm_ssh_key.stat.exists
 
     - name: Fetch generated SSH Public Key
       ansible.builtin.slurp:
         src: "/home/{{ app_user }}/.ssh/id_rsa.pub"
       register: ssh_pub_key
+      when:
+        - not local_ssh_key.stat.exists
+        - not vm_ssh_key.stat.exists
 
     - name: Display SSH Public Key to add to GitHub
       ansible.builtin.debug:
@@ -165,10 +218,16 @@
           "----------------------------------------------------------------------"
           "{{ ssh_pub_key['content'] | b64decode }}"
           "----------------------------------------------------------------------"
+      when:
+        - not local_ssh_key.stat.exists
+        - not vm_ssh_key.stat.exists
 
     - name: Pause playbook for user to add SSH key to GitHub
       ansible.builtin.pause:
         prompt: "Please add the SSH key above to your GitHub profile, then press ENTER to continue..."
+      when:
+        - not local_ssh_key.stat.exists
+        - not vm_ssh_key.stat.exists
 
     - name: Add GitHub to known_hosts
       ansible.builtin.known_hosts:
