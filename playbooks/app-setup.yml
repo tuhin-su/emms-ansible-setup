@@ -110,7 +110,7 @@
     # Install Composer
     # ---------------------------------------------------------
     - name: Check if Composer is installed
-      ansible.builtin.command: command -v composer
+      ansible.builtin.shell: command -v composer
       register: composer_check
       ignore_errors: true
       changed_when: false
