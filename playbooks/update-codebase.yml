@@ -18,12 +18,14 @@
         key_file: "/home/{{ app_user }}/.ssh/id_rsa"
         accept_hostkey: yes
         update: yes
-        force: no
+        force: yes
       become_user: "{{ app_user }}"
 
     - name: Install/Update Composer Dependencies
-      ansible.builtin.command: /usr/local/bin/composer install --no-dev --optimize-autoloader
+      ansible.builtin.shell: "php artisan optimize:clear; php artisan optimize; composer dumpautoload; php artisan octane:reload || true"
       args:
         chdir: "{{ project_root }}"
+      environment:
+        PATH: "/usr/local/bin:/usr/bin:/bin"
       become_user: "{{ app_user }}"
       ignore_errors: true

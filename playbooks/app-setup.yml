@@ -261,6 +261,8 @@
       ansible.builtin.command: /usr/local/bin/composer install --no-dev --optimize-autoloader
       args:
         chdir: "{{ project_root }}"
+      environment:
+        PATH: "/usr/local/bin:/usr/bin:/bin"
       become_user: "{{ app_user }}"
       ignore_errors: true
 
