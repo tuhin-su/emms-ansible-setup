@@ -1,0 +1,113 @@
+---
+- name: Webserver Setup (Nginx, PHP-FPM, Firewalls, SELinux)
+  hosts: nginx
+  vars_prompt:
+    - name: ansible_password
+      prompt: "Enter SSH password"
+      private: true
+  vars:
+    php_version: "8.2"
+    project_root: "/var/www/ees"
+    fpm_socket: "{{ 'unix:/var/run/php/php' + php_version + '-fpm.sock' if ansible_os_family == 'Debian' else 'unix:/run/php-fpm/www.sock' }}"
+    fpm_service: "{{ 'php' + php_version + '-fpm' if ansible_os_family == 'Debian' else 'php-fpm' }}"
+    nginx_service: "nginx"
+
+  become: true
+  tasks:
+    # ---------------------------------------------------------
+    # Firewalls, SELinux, PHP-FPM
+    # ---------------------------------------------------------
+    - name: Ubuntu/Debian | Allow HTTP/HTTPS in UFW
+      ansible.builtin.command: ufw allow {{ item }}
+      loop:
+        - "Nginx Full"
+        - "OpenSSH"
+      when: ansible_os_family == "Debian"
+      ignore_errors: true
+
+    - name: RedHat | Allow HTTP in Firewalld
+      ansible.builtin.shell: |
+        if command -v firewall-cmd >/dev/null; then 
+          firewall-cmd --permanent --add-service=http || true
+        fi
+      when: ansible_os_family == "RedHat"
+      ignore_errors: true
+      notify: Reload Firewalld
+
+    - name: RedHat | Set SELinux to permissive to allow Nginx/FPM access
+      ansible.builtin.shell: |
+        if command -v setenforce >/dev/null && getenforce | grep -vi 'disabled'; then 
+          setenforce 0 || true
+        fi
+      when: ansible_os_family == "RedHat"
+      ignore_errors: true
+
+    - name: RedHat | Check if SELinux config exists
+      ansible.builtin.stat:
+        path: /etc/selinux/config
+      register: selinux_config_file
+      when: ansible_os_family == "RedHat"
+
+    - name: RedHat | Persist SELinux permissive state
+      ansible.builtin.replace:
+        path: /etc/selinux/config
+        regexp: '^SELINUX=.*'
+        replace: 'SELINUX=permissive'
+      when: ansible_os_family == "RedHat" and selinux_config_file.stat.exists
+      ignore_errors: true
+
+    - name: RedHat | Configure PHP-FPM to run as nginx user
+      ansible.builtin.replace:
+        path: /etc/php-fpm.d/www.conf
+        regexp: '^{{ item }} = .*'
+        replace: '{{ item }} = nginx'
+      loop:
+        - 'user'
+        - 'group'
+        - 'listen.owner'
+        - 'listen.group'
+      when: ansible_os_family == "RedHat"
+      notify: Restart PHP-FPM
+
+    # ---------------------------------------------------------
+    # Nginx Configuration
+    # ---------------------------------------------------------
+    - name: Configure Nginx Virtual Host
+      ansible.builtin.template:
+        src: ../templates/nginx.conf.j2
+        dest: "/etc/nginx/conf.d/ees.conf"
+      notify: Restart Nginx
+
+    - name: Remove default Nginx site (Debian/Ubuntu)
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      when: ansible_os_family == "Debian"
+      notify: Restart Nginx
+
+    - name: Ensure Nginx and PHP-FPM are enabled and started
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - "{{ nginx_service }}"
+        - "{{ fpm_service }}"
+
+  handlers:
+    - name: Restart Nginx
+      ansible.builtin.service:
+        name: "{{ nginx_service }}"
+        state: restarted
+
+    - name: Restart PHP-FPM
+      ansible.builtin.service:
+        name: "{{ fpm_service }}"
+        state: restarted
+
+    - name: Reload Firewalld
+      ansible.builtin.shell: |
+        if command -v firewall-cmd >/dev/null; then 
+          firewall-cmd --reload || true
+        fi
+      ignore_errors: true

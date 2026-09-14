@@ -1,0 +1,9 @@
+---
+# Master Playbook
+# This playbook links and runs all the sub-playbooks in the correct order.
+# You can run this file to execute a complete full-stack deployment,
+# or you can run the individual files in the playbooks/ folder separately.
+
+- ansible.builtin.import_playbook: playbooks/app-setup.yml
+- ansible.builtin.import_playbook: playbooks/nginx-setup.yml
+- ansible.builtin.import_playbook: playbooks/update-codebase.yml

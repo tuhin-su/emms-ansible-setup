@@ -1,0 +1,29 @@
+---
+- name: Update Codebase
+  hosts: ees_app
+  vars_prompt:
+    - name: ansible_password
+      prompt: "Enter SSH password"
+      private: true
+  vars:
+    app_user: "ees"
+    project_root: "/var/www/ees"
+
+  become: true
+  tasks:
+    - name: Fetch and Pull latest code from Git
+      ansible.builtin.git:
+        repo: "git@github.com:snbhattacharjya/ees.git"
+        dest: "{{ project_root }}"
+        key_file: "/home/{{ app_user }}/.ssh/id_rsa"
+        accept_hostkey: yes
+        update: yes
+        force: no
+      become_user: "{{ app_user }}"
+
+    - name: Install/Update Composer Dependencies
+      ansible.builtin.command: /usr/local/bin/composer install --no-dev --optimize-autoloader
+      args:
+        chdir: "{{ project_root }}"
+      become_user: "{{ app_user }}"
+      ignore_errors: true

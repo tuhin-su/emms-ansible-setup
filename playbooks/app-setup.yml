@@ -1,0 +1,243 @@
+---
+- name: Application Environment Setup (PHP, Composer, Git, App User)
+  hosts: ees_app
+  vars_prompt:
+    - name: ansible_password
+      prompt: "Enter SSH password"
+      private: true
+  vars:
+    php_version: "8.2"
+    app_user: "ees"
+    app_group: "ees"
+    project_root: "/var/www/ees"
+    repo_url: "git@github.com:snbhattacharjya/ees.git"
+    web_user: "{{ 'www-data' if ansible_os_family == 'Debian' else 'nginx' if ansible_os_family == 'RedHat' else 'http' }}"
+
+  become: true
+  tasks:
+    # ---------------------------------------------------------
+    # System Packages & PHP Setup
+    # ---------------------------------------------------------
+    - name: Ubuntu/Debian | Install prerequisites
+      ansible.builtin.apt:
+        name: [software-properties-common, ca-certificates, apt-transport-https, lsb-release, gnupg, curl, unzip, git, nginx]
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Ubuntu | Add ondrej/php PPA
+      ansible.builtin.apt_repository:
+        repo: ppa:ondrej/php
+        state: present
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Debian | Add sury PHP repository key
+      ansible.builtin.get_url:
+        url: https://packages.sury.org/php/apt.gpg
+        dest: /etc/apt/trusted.gpg.d/php.gpg
+        mode: '0644'
+      when: ansible_distribution == "Debian"
+
+    - name: Debian | Add sury PHP repository
+      ansible.builtin.apt_repository:
+        repo: "deb https://packages.sury.org/php/ {{ ansible_distribution_release }} main"
+        state: present
+      when: ansible_distribution == "Debian"
+
+    - name: Ubuntu/Debian | Install PHP and extensions
+      ansible.builtin.apt:
+        name:
+          - "php{{ php_version }}"
+          - "php{{ php_version }}-cli"
+          - "php{{ php_version }}-fpm"
+          - "php{{ php_version }}-common"
+          - "php{{ php_version }}-bcmath"
+          - "php{{ php_version }}-bz2"
+          - "php{{ php_version }}-curl"
+          - "php{{ php_version }}-gd"
+          - "php{{ php_version }}-igbinary"
+          - "php{{ php_version }}-imagick"
+          - "php{{ php_version }}-intl"
+          - "php{{ php_version }}-mbstring"
+          - "php{{ php_version }}-mysql"
+          - "php{{ php_version }}-opcache"
+          - "php{{ php_version }}-pgsql"
+          - "php{{ php_version }}-readline"
+          - "php{{ php_version }}-redis"
+          - "php{{ php_version }}-soap"
+          - "php{{ php_version }}-sqlite3"
+          - "php{{ php_version }}-xml"
+          - "php{{ php_version }}-zip"
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: RHEL/CentOS | Install EPEL repository
+      ansible.builtin.package:
+        name: epel-release
+        state: present
+      when: ansible_os_family == "RedHat" and ansible_distribution != "Fedora"
+
+    - name: RHEL/CentOS | Install Remi repository
+      ansible.builtin.package:
+        name: "https://rpms.remirepo.net/enterprise/remi-release-{{ ansible_distribution_major_version }}.rpm"
+        state: present
+        disable_gpg_check: yes
+      when: ansible_os_family == "RedHat" and ansible_distribution != "Fedora"
+      ignore_errors: true
+
+    - name: RHEL/CentOS | Reset and enable Remi PHP module
+      ansible.builtin.command: "{{ item }}"
+      loop:
+        - "dnf module reset php -y"
+        - "dnf module enable php:remi-{{ php_version }} -y"
+      when: ansible_os_family == "RedHat" and ansible_distribution != "Fedora" and ansible_pkg_mgr == "dnf"
+      ignore_errors: true
+
+    - name: RHEL/Fedora | Install PHP, Nginx and extensions
+      ansible.builtin.package:
+        name: [nginx, php, php-cli, php-fpm, php-common, php-bcmath, php-bz2, php-curl, php-gd, php-intl, php-mbstring, php-mysqlnd, php-opcache, php-pgsql, php-pecl-redis, php-pecl-imagick, php-soap, php-pdo, php-xml, php-zip, unzip, git]
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Arch Linux | Install PHP, Nginx and extensions
+      ansible.builtin.package:
+        name: [nginx, php, php-fpm, php-gd, php-intl, php-pgsql, php-sqlite, php-redis, imagemagick, composer, git, unzip]
+        state: present
+      when: ansible_os_family == "Archlinux"
+
+    # ---------------------------------------------------------
+    # Install Composer
+    # ---------------------------------------------------------
+    - name: Check if Composer is installed
+      ansible.builtin.command: command -v composer
+      register: composer_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Download Composer installer
+      ansible.builtin.get_url:
+        url: https://getcomposer.org/installer
+        dest: /tmp/composer-setup.php
+      when: composer_check.rc != 0
+
+    - name: Install Composer
+      ansible.builtin.command: php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer
+      when: composer_check.rc != 0
+
+    - name: Remove Composer setup script
+      ansible.builtin.file:
+        path: /tmp/composer-setup.php
+        state: absent
+      when: composer_check.rc != 0
+
+    # ---------------------------------------------------------
+    # User Setup & SSH Key Generation
+    # ---------------------------------------------------------
+    - name: Create App Group
+      ansible.builtin.group:
+        name: "{{ app_group }}"
+        state: present
+
+    - name: Create App User and Generate SSH Key
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        group: "{{ app_group }}"
+        groups: "{{ web_user }}"
+        append: yes
+        shell: /bin/bash
+        create_home: yes
+        generate_ssh_key: yes
+        ssh_key_bits: 2048
+        ssh_key_file: .ssh/id_rsa
+
+    - name: Fetch generated SSH Public Key
+      ansible.builtin.slurp:
+        src: "/home/{{ app_user }}/.ssh/id_rsa.pub"
+      register: ssh_pub_key
+
+    - name: Display SSH Public Key to add to GitHub
+      ansible.builtin.debug:
+        msg: |
+          "----------------------------------------------------------------------"
+          " ACTION REQUIRED: Add the following SSH public key to your GitHub "
+          " account (Settings -> SSH and GPG keys) to allow cloning the repo:"
+          "----------------------------------------------------------------------"
+          "{{ ssh_pub_key['content'] | b64decode }}"
+          "----------------------------------------------------------------------"
+
+    - name: Pause playbook for user to add SSH key to GitHub
+      ansible.builtin.pause:
+        prompt: "Please add the SSH key above to your GitHub profile, then press ENTER to continue..."
+
+    - name: Add GitHub to known_hosts
+      ansible.builtin.known_hosts:
+        path: "/home/{{ app_user }}/.ssh/known_hosts"
+        name: github.com
+        key: "{{ lookup('pipe', 'ssh-keyscan -t rsa github.com') }}"
+        state: present
+      become_user: "{{ app_user }}"
+
+    # ---------------------------------------------------------
+    # Application Deployment (Git & Composer)
+    # ---------------------------------------------------------
+    - name: Ensure project root directory exists and has correct ownership
+      ansible.builtin.file:
+        path: "{{ project_root }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0755"
+
+    - name: Clone Git Repository
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ project_root }}"
+        key_file: "/home/{{ app_user }}/.ssh/id_rsa"
+        accept_hostkey: yes
+        force: yes
+      become_user: "{{ app_user }}"
+
+    - name: Install Composer Dependencies
+      ansible.builtin.command: /usr/local/bin/composer install --no-dev --optimize-autoloader
+      args:
+        chdir: "{{ project_root }}"
+      become_user: "{{ app_user }}"
+      ignore_errors: true
+
+    - name: Set correct permissions for Laravel storage and cache directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ web_user }}"
+        mode: "0775"
+        recurse: yes
+      loop:
+        - "{{ project_root }}/storage"
+        - "{{ project_root }}/bootstrap/cache"
+      ignore_errors: true
+
+    - name: Copy .env.example to .env
+      ansible.builtin.copy:
+        src: "{{ project_root }}/.env.example"
+        dest: "{{ project_root }}/.env"
+        remote_src: yes
+        force: no
+      become_user: "{{ app_user }}"
+      ignore_errors: true
+
+    - name: Check if APP_KEY is empty in .env
+      ansible.builtin.shell: grep -E "^APP_KEY=$" {{ project_root }}/.env || grep -E "^APP_KEY=$" {{ project_root }}/.env.example
+      register: app_key_check
+      ignore_errors: true
+      changed_when: false
+      become_user: "{{ app_user }}"
+
+    - name: Generate Laravel App Key
+      ansible.builtin.command: php artisan key:generate --force
+      args:
+        chdir: "{{ project_root }}"
+      when: app_key_check.rc == 0
+      become_user: "{{ app_user }}"
+      ignore_errors: true
