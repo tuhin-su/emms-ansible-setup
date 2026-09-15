@@ -87,12 +87,28 @@
         name: epel-release
         state: present
       when: ansible_facts['os_family'] == "RedHat" and ansible_facts['distribution'] != "Fedora"
+      ignore_errors: true
+
+    - name: RHEL/CentOS | Install Remi repository
+      ansible.builtin.package:
+        name: "https://rpms.remirepo.net/enterprise/remi-release-{{ ansible_facts['distribution_major_version'] }}.rpm"
+        state: present
+        disable_gpg_check: yes
+      when: ansible_facts['os_family'] == "RedHat" and ansible_facts['distribution'] != "Fedora"
+      ignore_errors: true
+
+    - name: RHEL/CentOS | Enable Remi PHP module stream
+      ansible.builtin.command: "{{ item }}"
+      loop:
+        - "dnf module reset php -y"
+        - "dnf module enable php:remi-{{ php_version }} -y"
+      when: ansible_facts['os_family'] == "RedHat" and ansible_facts['distribution'] != "Fedora" and ansible_facts['pkg_mgr'] == "dnf"
 
 
     - name: RHEL/Fedora | Install PHP, Nginx and extensions
       ansible.builtin.package:
         name: [nginx, php, php-cli, php-fpm, php-common, php-bcmath, php-bz2, php-curl, php-gd, php-intl, php-mbstring, php-mysqlnd, php-opcache, php-pgsql, php-pecl-redis, php-pecl-imagick, php-soap, php-pdo, php-xml, php-zip, unzip, git]
-        state: present
+        state: latest
       when: ansible_facts['os_family'] == "RedHat"
 
     - name: Arch Linux | Install PHP, Nginx and extensions
