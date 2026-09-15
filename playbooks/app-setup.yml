@@ -21,27 +21,30 @@
     # ---------------------------------------------------------
     - name: Ubuntu/Debian | Install prerequisites
       ansible.builtin.apt:
-        name: [software-properties-common, ca-certificates, apt-transport-https, lsb-release, gnupg, curl, unzip, git, nginx]
+        name: [software-properties-common, ca-certificates, apt-transport-https, lsb-release, gnupg, curl, unzip, git, nginx, python3-debian]
         state: present
         update_cache: yes
       when: ansible_os_family == "Debian"
 
     - name: Ubuntu | Add ondrej/php PPA
-      ansible.builtin.apt_repository:
-        repo: ppa:ondrej/php
+      ansible.builtin.deb822_repository:
+        name: ondrej-php
+        types: [deb]
+        uris: ["https://ppa.launchpadcontent.net/ondrej/php/ubuntu"]
+        suites: ["{{ ansible_distribution_release }}"]
+        components: [main]
+        signed_by: "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x4F4EA0AAE5267A6C"
         state: present
       when: ansible_distribution == "Ubuntu"
 
-    - name: Debian | Add sury PHP repository key
-      ansible.builtin.get_url:
-        url: https://packages.sury.org/php/apt.gpg
-        dest: /etc/apt/trusted.gpg.d/php.gpg
-        mode: '0644'
-      when: ansible_distribution == "Debian"
-
     - name: Debian | Add sury PHP repository
-      ansible.builtin.apt_repository:
-        repo: "deb https://packages.sury.org/php/ {{ ansible_distribution_release }} main"
+      ansible.builtin.deb822_repository:
+        name: sury-php
+        types: [deb]
+        uris: ["https://packages.sury.org/php/"]
+        suites: ["{{ ansible_distribution_release }}"]
+        components: [main]
+        signed_by: "https://packages.sury.org/php/apt.gpg"
         state: present
       when: ansible_distribution == "Debian"
 
