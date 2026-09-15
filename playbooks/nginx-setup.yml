@@ -8,8 +8,8 @@
   vars:
     php_version: "8.2"
     project_root: "/var/www/ees"
-    fpm_socket: "{{ 'unix:/var/run/php/php' + php_version + '-fpm.sock' if ansible_os_family == 'Debian' else 'unix:/run/php-fpm/www.sock' }}"
-    fpm_service: "{{ 'php' + php_version + '-fpm' if ansible_os_family == 'Debian' else 'php-fpm' }}"
+    fpm_socket: "{{ 'unix:/var/run/php/php' + php_version + '-fpm.sock' if ansible_facts['os_family'] == 'Debian' else 'unix:/run/php-fpm/www.sock' }}"
+    fpm_service: "{{ 'php' + php_version + '-fpm' if ansible_facts['os_family'] == 'Debian' else 'php-fpm' }}"
     nginx_service: "nginx"
 
   become: true
@@ -24,7 +24,7 @@
       loop:
         - "Nginx Full"
         - "OpenSSH"
-      when: ansible_os_family == "Debian"
+      when: ansible_facts['os_family'] == "Debian"
       ignore_errors: true
 
     - name: RedHat | Allow HTTP in Firewalld
@@ -32,7 +32,7 @@
         service: http
         permanent: yes
         state: enabled
-      when: ansible_os_family == "RedHat"
+      when: ansible_facts['os_family'] == "RedHat"
       ignore_errors: true
       notify: Reload Firewalld
 
@@ -40,21 +40,21 @@
       ansible.posix.selinux:
         state: permissive
         policy: targeted
-      when: ansible_os_family == "RedHat"
+      when: ansible_facts['os_family'] == "RedHat"
       ignore_errors: true
 
     - name: RedHat | Check if SELinux config exists
       ansible.builtin.stat:
         path: /etc/selinux/config
       register: selinux_config_file
-      when: ansible_os_family == "RedHat"
+      when: ansible_facts['os_family'] == "RedHat"
 
     - name: RedHat | Persist SELinux permissive state
       ansible.builtin.replace:
         path: /etc/selinux/config
         regexp: '^SELINUX=.*'
         replace: 'SELINUX=permissive'
-      when: ansible_os_family == "RedHat" and selinux_config_file.stat.exists
+      when: ansible_facts['os_family'] == "RedHat" and selinux_config_file.stat.exists
       ignore_errors: true
 
     - name: RedHat | Configure PHP-FPM to run as nginx user
@@ -67,7 +67,7 @@
         - 'group'
         - 'listen.owner'
         - 'listen.group'
-      when: ansible_os_family == "RedHat"
+      when: ansible_facts['os_family'] == "RedHat"
       notify: Restart PHP-FPM
 
     # ---------------------------------------------------------
@@ -83,7 +83,7 @@
       ansible.builtin.file:
         path: /etc/nginx/sites-enabled/default
         state: absent
-      when: ansible_os_family == "Debian"
+      when: ansible_facts['os_family'] == "Debian"
       notify: Restart Nginx
 
     - name: Ensure Nginx and PHP-FPM are enabled and started

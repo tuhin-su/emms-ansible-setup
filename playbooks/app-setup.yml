@@ -12,7 +12,7 @@
     app_user_home: "/var/www"
     project_root: "/var/www/ees"
     repo_url: "https://github.com/snbhattacharjya/ees.git"
-    web_user: "{{ 'www-data' if ansible_os_family == 'Debian' else 'nginx' if ansible_os_family == 'RedHat' else 'http' }}"
+    web_user: "{{ 'www-data' if ansible_facts['os_family'] == 'Debian' else 'nginx' if ansible_facts['os_family'] == 'RedHat' else 'http' }}"
 
   become: true
   tasks:
@@ -24,29 +24,29 @@
         name: [software-properties-common, ca-certificates, apt-transport-https, lsb-release, gnupg, curl, unzip, git, nginx, python3-debian]
         state: present
         update_cache: yes
-      when: ansible_os_family == "Debian"
+      when: ansible_facts['os_family'] == "Debian"
 
     - name: Ubuntu | Add ondrej/php PPA
       ansible.builtin.deb822_repository:
         name: ondrej-php
         types: [deb]
         uris: ["https://ppa.launchpadcontent.net/ondrej/php/ubuntu"]
-        suites: ["{{ ansible_distribution_release }}"]
+        suites: ["{{ ansible_facts['distribution_release'] }}"]
         components: [main]
         signed_by: "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x4F4EA0AAE5267A6C"
         state: present
-      when: ansible_distribution == "Ubuntu"
+      when: ansible_facts['distribution'] == "Ubuntu"
 
     - name: Debian | Add sury PHP repository
       ansible.builtin.deb822_repository:
         name: sury-php
         types: [deb]
         uris: ["https://packages.sury.org/php/"]
-        suites: ["{{ ansible_distribution_release }}"]
+        suites: ["{{ ansible_facts['distribution_release'] }}"]
         components: [main]
         signed_by: "https://packages.sury.org/php/apt.gpg"
         state: present
-      when: ansible_distribution == "Debian"
+      when: ansible_facts['distribution'] == "Debian"
 
     - name: Ubuntu/Debian | Install PHP and extensions
       ansible.builtin.apt:
@@ -74,26 +74,26 @@
           - "php{{ php_version }}-zip"
         state: present
         update_cache: yes
-      when: ansible_os_family == "Debian"
+      when: ansible_facts['os_family'] == "Debian"
 
     - name: RHEL/CentOS | Install EPEL repository
       ansible.builtin.package:
         name: epel-release
         state: present
-      when: ansible_os_family == "RedHat" and ansible_distribution != "Fedora"
+      when: ansible_facts['os_family'] == "RedHat" and ansible_facts['distribution'] != "Fedora"
 
 
     - name: RHEL/Fedora | Install PHP, Nginx and extensions
       ansible.builtin.package:
         name: [nginx, php, php-cli, php-fpm, php-common, php-bcmath, php-bz2, php-curl, php-gd, php-intl, php-mbstring, php-mysqlnd, php-opcache, php-pgsql, php-pecl-redis, php-pecl-imagick, php-soap, php-pdo, php-xml, php-zip, unzip, git]
         state: present
-      when: ansible_os_family == "RedHat"
+      when: ansible_facts['os_family'] == "RedHat"
 
     - name: Arch Linux | Install PHP, Nginx and extensions
       ansible.builtin.package:
         name: [nginx, php, php-fpm, php-gd, php-intl, php-pgsql, php-sqlite, php-redis, imagemagick, composer, git, unzip]
         state: present
-      when: ansible_os_family == "Archlinux"
+      when: ansible_facts['os_family'] == "Archlinux"
 
     # ---------------------------------------------------------
     # Install Composer
