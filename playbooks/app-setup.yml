@@ -134,7 +134,7 @@
         name: "{{ app_group }}"
         state: present
 
-    - name: Create App User and Generate SSH Key
+    - name: Create App User
       ansible.builtin.user:
         name: "{{ app_user }}"
         group: "{{ app_group }}"
@@ -165,14 +165,12 @@
       become_user: "{{ app_user }}"
 
     - name: Install Composer Dependencies
-      ansible.builtin.command: /usr/local/bin/composer install --no-dev --optimize-autoloader
+      ansible.builtin.command: composer install --no-dev --optimize-autoloader
       args:
         chdir: "{{ project_root }}"
-        creates: "{{ project_root }}/vendor"
       environment:
         PATH: "/usr/local/bin:/usr/bin:/bin"
       become_user: "{{ app_user }}"
-      ignore_errors: true
 
     - name: Set correct permissions for Laravel storage and cache directories
       ansible.builtin.file:
