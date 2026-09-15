@@ -79,21 +79,6 @@
         state: present
       when: ansible_os_family == "RedHat" and ansible_distribution != "Fedora"
 
-    - name: RHEL/CentOS | Install Remi repository
-      ansible.builtin.package:
-        name: "https://rpms.remirepo.net/enterprise/remi-release-{{ ansible_distribution_major_version }}.rpm"
-        state: present
-        disable_gpg_check: yes
-      when: ansible_os_family == "RedHat" and ansible_distribution != "Fedora"
-      ignore_errors: true
-
-    - name: RHEL/CentOS | Reset and enable Remi PHP module
-      ansible.builtin.command: "{{ item }}"
-      loop:
-        - "dnf module reset php -y"
-        - "dnf module enable php:remi-{{ php_version }} -y"
-      when: ansible_os_family == "RedHat" and ansible_distribution != "Fedora" and ansible_pkg_mgr == "dnf"
-      ignore_errors: true
 
     - name: RHEL/Fedora | Install PHP, Nginx and extensions
       ansible.builtin.package:
