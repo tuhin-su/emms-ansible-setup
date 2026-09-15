@@ -5,13 +5,19 @@
     - name: ansible_password
       prompt: "Enter SSH password"
       private: true
+    - name: git_username
+      prompt: "Enter Git Username"
+      private: false
+    - name: git_password
+      prompt: "Enter Git Password or Personal Access Token"
+      private: true
   vars:
     php_version: "8.2"
     app_user: "www-data"
     app_group: "www-data"
     app_user_home: "/var/www"
     project_root: "/var/www/ees"
-    repo_url: "https://github.com/snbhattacharjya/ees.git"
+    repo_url: "https://{{ git_username | urlencode }}:{{ git_password | urlencode }}@github.com/snbhattacharjya/ees.git"
     web_user: "{{ 'www-data' if ansible_facts['os_family'] == 'Debian' else 'nginx' if ansible_facts['os_family'] == 'RedHat' else 'http' }}"
 
   become: true

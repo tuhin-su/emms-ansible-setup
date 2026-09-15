@@ -5,16 +5,23 @@
     - name: ansible_password
       prompt: "Enter SSH password"
       private: true
+    - name: git_username
+      prompt: "Enter Git Username"
+      private: false
+    - name: git_password
+      prompt: "Enter Git Password or Personal Access Token"
+      private: true
   vars:
     app_user: "www-data"
     app_user_home: "/var/www"
     project_root: "/var/www/ees"
+    repo_url: "https://{{ git_username | urlencode }}:{{ git_password | urlencode }}@github.com/snbhattacharjya/ees.git"
 
   become: true
   tasks:
     - name: Fetch and Pull latest code from Git
       ansible.builtin.git:
-        repo: "https://github.com/snbhattacharjya/ees.git"
+        repo: "{{ repo_url }}"
         dest: "{{ project_root }}"
         update: yes
         force: yes
