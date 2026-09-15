@@ -14,10 +14,8 @@
   tasks:
     - name: Fetch and Pull latest code from Git
       ansible.builtin.git:
-        repo: "git@github.com:snbhattacharjya/ees.git"
+        repo: "https://github.com/snbhattacharjya/ees.git"
         dest: "{{ project_root }}"
-        key_file: "{{ app_user_home }}/.ssh/id_rsa"
-        accept_hostkey: yes
         update: yes
         force: yes
       become_user: "{{ app_user }}"

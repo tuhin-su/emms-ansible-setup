@@ -11,7 +11,7 @@
     app_group: "www-data"
     app_user_home: "/var/www"
     project_root: "/var/www/ees"
-    repo_url: "git@github.com:snbhattacharjya/ees.git"
+    repo_url: "https://github.com/snbhattacharjya/ees.git"
     web_user: "{{ 'www-data' if ansible_os_family == 'Debian' else 'nginx' if ansible_os_family == 'RedHat' else 'http' }}"
 
   become: true
@@ -135,94 +135,7 @@
         home: "{{ app_user_home }}"
         create_home: yes
 
-    - name: Ensure .ssh directory exists
-      ansible.builtin.file:
-        path: "{{ app_user_home }}/.ssh"
-        state: directory
-        owner: "{{ app_user }}"
-        group: "{{ app_group }}"
-        mode: "0700"
 
-    - name: Check if local SSH private key template exists
-      ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../templates/git_id_rsa"
-      register: local_ssh_key
-      delegate_to: localhost
-      become: false
-
-    - name: Check if local SSH public key template exists
-      ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../templates/git_id_rsa.pub"
-      register: local_ssh_pub_key
-      delegate_to: localhost
-      become: false
-
-    - name: Copy GitHub SSH Private Key from template
-      ansible.builtin.copy:
-        src: ../templates/git_id_rsa
-        dest: "{{ app_user_home }}/.ssh/id_rsa"
-        owner: "{{ app_user }}"
-        group: "{{ app_group }}"
-        mode: "0600"
-      when: local_ssh_key.stat.exists
-
-    - name: Copy GitHub SSH Public Key from template
-      ansible.builtin.copy:
-        src: ../templates/git_id_rsa.pub
-        dest: "{{ app_user_home }}/.ssh/id_rsa.pub"
-        owner: "{{ app_user }}"
-        group: "{{ app_group }}"
-        mode: "0644"
-      when: local_ssh_pub_key.stat.exists
-
-    - name: Check if SSH key already exists on target VM
-      ansible.builtin.stat:
-        path: "{{ app_user_home }}/.ssh/id_rsa"
-      register: vm_ssh_key
-      when: not local_ssh_key.stat.exists
-
-    - name: Generate SSH Key on target VM if not provided in templates
-      ansible.builtin.command: ssh-keygen -t rsa -b 4096 -f {{ app_user_home }}/.ssh/id_rsa -N ""
-      become_user: "{{ app_user }}"
-      when:
-        - not local_ssh_key.stat.exists
-        - not vm_ssh_key.stat.exists
-
-    - name: Fetch generated SSH Public Key
-      ansible.builtin.slurp:
-        src: "{{ app_user_home }}/.ssh/id_rsa.pub"
-      register: ssh_pub_key
-      when:
-        - not local_ssh_key.stat.exists
-        - not vm_ssh_key.stat.exists
-
-    - name: Display SSH Public Key to add to GitHub
-      ansible.builtin.debug:
-        msg: |
-          "----------------------------------------------------------------------"
-          " ACTION REQUIRED: Add the following SSH public key to your GitHub "
-          " account (Settings -> SSH and GPG keys) to allow cloning the repo:"
-          "----------------------------------------------------------------------"
-          "{{ ssh_pub_key['content'] | b64decode }}"
-          "----------------------------------------------------------------------"
-      when:
-        - not local_ssh_key.stat.exists
-        - not vm_ssh_key.stat.exists
-
-    - name: Pause playbook for user to add SSH key to GitHub
-      ansible.builtin.pause:
-        prompt: "Please add the SSH key above to your GitHub profile, then press ENTER to continue..."
-      when:
-        - not local_ssh_key.stat.exists
-        - not vm_ssh_key.stat.exists
-
-    - name: Add GitHub to known_hosts
-      ansible.builtin.known_hosts:
-        path: "{{ app_user_home }}/.ssh/known_hosts"
-        name: github.com
-        key: "{{ lookup('pipe', 'ssh-keyscan -t rsa github.com') }}"
-        state: present
-      become_user: "{{ app_user }}"
 
     # ---------------------------------------------------------
     # Application Deployment (Git & Composer)
@@ -239,8 +152,6 @@
       ansible.builtin.git:
         repo: "{{ repo_url }}"
         dest: "{{ project_root }}"
-        key_file: "{{ app_user_home }}/.ssh/id_rsa"
-        accept_hostkey: yes
         force: yes
       become_user: "{{ app_user }}"
 
