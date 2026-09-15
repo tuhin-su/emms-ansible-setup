@@ -18,7 +18,9 @@
     # Firewalls, SELinux, PHP-FPM
     # ---------------------------------------------------------
     - name: Ubuntu/Debian | Allow HTTP/HTTPS in UFW
-      ansible.builtin.command: ufw allow {{ item }}
+      community.general.ufw:
+        rule: allow
+        name: "{{ item }}"
       loop:
         - "Nginx Full"
         - "OpenSSH"
@@ -26,19 +28,18 @@
       ignore_errors: true
 
     - name: RedHat | Allow HTTP in Firewalld
-      ansible.builtin.shell: |
-        if command -v firewall-cmd >/dev/null; then 
-          firewall-cmd --permanent --add-service=http || true
-        fi
+      ansible.posix.firewalld:
+        service: http
+        permanent: yes
+        state: enabled
       when: ansible_os_family == "RedHat"
       ignore_errors: true
       notify: Reload Firewalld
 
     - name: RedHat | Set SELinux to permissive to allow Nginx/FPM access
-      ansible.builtin.shell: |
-        if command -v setenforce >/dev/null && getenforce | grep -vi 'disabled'; then 
-          setenforce 0 || true
-        fi
+      ansible.posix.selinux:
+        state: permissive
+        policy: targeted
       when: ansible_os_family == "RedHat"
       ignore_errors: true
 
@@ -106,8 +107,7 @@
         state: restarted
 
     - name: Reload Firewalld
-      ansible.builtin.shell: |
-        if command -v firewall-cmd >/dev/null; then 
-          firewall-cmd --reload || true
-        fi
+      ansible.builtin.service:
+        name: firewalld
+        state: reloaded
       ignore_errors: true
