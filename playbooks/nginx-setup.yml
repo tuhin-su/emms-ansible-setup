@@ -1,21 +1,20 @@
 ---
-- name: Webserver Setup (Nginx, PHP-FPM, Firewalls, SELinux)
+- name: Webserver Setup (Nginx, Firewalls, SELinux, Octane Reverse Proxy)
   hosts: nginx
   vars_prompt:
     - name: ansible_password
       prompt: "Enter SSH password"
       private: true
   vars:
-    php_version: "8.2"
-    project_root: "/var/www/ees"
-    fpm_socket: "{{ 'unix:/var/run/php/php' + php_version + '-fpm.sock' if ansible_facts['os_family'] == 'Debian' else 'unix:/run/php-fpm/www.sock' }}"
-    fpm_service: "{{ 'php' + php_version + '-fpm' if ansible_facts['os_family'] == 'Debian' else 'php-fpm' }}"
+    project_root: "/home/www-data/emms"
     nginx_service: "nginx"
+    octane_host: "127.0.0.1"
+    octane_port: 8000
 
   become: true
   tasks:
     # ---------------------------------------------------------
-    # Firewalls, SELinux, PHP-FPM
+    # Firewalls & SELinux
     # ---------------------------------------------------------
     - name: Ubuntu/Debian | Allow HTTP/HTTPS in UFW
       community.general.ufw:
@@ -27,16 +26,19 @@
       when: ansible_facts['os_family'] == "Debian"
       ignore_errors: true
 
-    - name: RedHat | Allow HTTP in Firewalld
+    - name: RedHat | Allow HTTP and HTTPS in Firewalld
       ansible.posix.firewalld:
-        service: http
+        service: "{{ item }}"
         permanent: yes
         state: enabled
+      loop:
+        - http
+        - https
       when: ansible_facts['os_family'] == "RedHat"
       ignore_errors: true
       notify: Reload Firewalld
 
-    - name: RedHat | Set SELinux to permissive to allow Nginx/FPM access
+    - name: RedHat | Set SELinux to permissive to allow Nginx/Octane access
       ansible.posix.selinux:
         state: permissive
         policy: targeted
@@ -57,26 +59,19 @@
       when: ansible_facts['os_family'] == "RedHat" and selinux_config_file.stat.exists
       ignore_errors: true
 
-    - name: RedHat | Configure PHP-FPM to run as nginx user
-      ansible.builtin.replace:
-        path: /etc/php-fpm.d/www.conf
-        regexp: '^{{ item }} = .*'
-        replace: '{{ item }} = nginx'
-      loop:
-        - 'user'
-        - 'group'
-        - 'listen.owner'
-        - 'listen.group'
-      when: ansible_facts['os_family'] == "RedHat"
-      notify: Restart PHP-FPM
-
     # ---------------------------------------------------------
     # Nginx Configuration
     # ---------------------------------------------------------
-    - name: Configure Nginx Virtual Host
+    - name: Remove legacy EES Nginx configuration if present
+      ansible.builtin.file:
+        path: /etc/nginx/conf.d/ees.conf
+        state: absent
+      notify: Restart Nginx
+
+    - name: Configure Nginx Virtual Host for Octane
       ansible.builtin.template:
         src: ../templates/nginx.conf.j2
-        dest: "/etc/nginx/conf.d/ees.conf"
+        dest: "/etc/nginx/conf.d/emms.conf"
       notify: Restart Nginx
 
     - name: Remove default Nginx site (Debian/Ubuntu)
@@ -86,24 +81,16 @@
       when: ansible_facts['os_family'] == "Debian"
       notify: Restart Nginx
 
-    - name: Ensure Nginx and PHP-FPM are enabled and started
+    - name: Ensure Nginx is enabled and started
       ansible.builtin.service:
-        name: "{{ item }}"
+        name: "{{ nginx_service }}"
         state: started
         enabled: true
-      loop:
-        - "{{ nginx_service }}"
-        - "{{ fpm_service }}"
 
   handlers:
     - name: Restart Nginx
       ansible.builtin.service:
         name: "{{ nginx_service }}"
-        state: restarted
-
-    - name: Restart PHP-FPM
-      ansible.builtin.service:
-        name: "{{ fpm_service }}"
         state: restarted
 
     - name: Reload Firewalld

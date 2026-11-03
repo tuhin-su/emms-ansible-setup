@@ -1,6 +1,6 @@
 ---
 - name: Update Codebase
-  hosts: ees_app
+  hosts: ees_app, emms_app
   vars_prompt:
     - name: ansible_password
       prompt: "Enter SSH password"
@@ -13,9 +13,9 @@
       private: true
   vars:
     app_user: "www-data"
-    app_user_home: "/var/www"
-    project_root: "/var/www/ees"
-    repo_url: "https://{{ git_username | urlencode }}:{{ git_password | urlencode }}@github.com/snbhattacharjya/ees.git"
+    app_user_home: "/home/www-data"
+    project_root: "/home/www-data/emms"
+    repo_url: "https://{{ git_username | urlencode }}:{{ git_password | urlencode }}@github.com/snbhattacharjya/emms.git"
 
   become: true
   tasks:
@@ -25,13 +25,26 @@
         dest: "{{ project_root }}"
         update: yes
         force: yes
+      environment:
+        HOME: "{{ app_user_home }}"
       become_user: "{{ app_user }}"
 
-    - name: Install/Update Composer Dependencies
-      ansible.builtin.shell: "php artisan optimize:clear; php artisan optimize; composer dumpautoload; php artisan octane:reload || true"
+    - name: Install/Update Composer Dependencies and optimize
+      ansible.builtin.shell: "composer install --no-dev --optimize-autoloader; php artisan optimize:clear; php artisan optimize; composer dumpautoload"
       args:
         chdir: "{{ project_root }}"
       environment:
+        HOME: "{{ app_user_home }}"
+        PATH: "/usr/local/bin:/usr/bin:/bin"
+      become_user: "{{ app_user }}"
+      ignore_errors: true
+
+    - name: Restart Queue Workers, Scheduler, and Reload Octane
+      ansible.builtin.shell: "php artisan queue:restart; php artisan octane:reload || supervisorctl restart emms-octane:* emms-worker:* emms-scheduler:*"
+      args:
+        chdir: "{{ project_root }}"
+      environment:
+        HOME: "{{ app_user_home }}"
         PATH: "/usr/local/bin:/usr/bin:/bin"
       become_user: "{{ app_user }}"
       ignore_errors: true

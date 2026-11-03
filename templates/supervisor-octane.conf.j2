@@ -1,0 +1,13 @@
+[program:emms-octane]
+process_name=%(program_name)s_%(process_num)02d
+directory={{ project_root }}
+command=php {{ project_root }}/artisan octane:start --server=swoole --host={{ octane_host | default('127.0.0.1') }} --port={{ octane_port | default('8000') }}
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+user={{ app_user }}
+numprocs=1
+redirect_stderr=true
+stdout_logfile={{ project_root }}/storage/logs/octane.log
+stopwaitsecs=360

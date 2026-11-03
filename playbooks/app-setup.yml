@@ -1,6 +1,6 @@
 ---
-- name: Application Environment Setup (PHP, Composer, Git, App User)
-  hosts: ees_app
+- name: Application Environment Setup (PHP, Swoole, Composer, Git, App User, Supervisor, Octane, Worker, Scheduler)
+  hosts: ees_app, emms_app
   vars_prompt:
     - name: ansible_password
       prompt: "Enter SSH password"
@@ -15,19 +15,26 @@
     php_version: "8.2"
     app_user: "www-data"
     app_group: "www-data"
-    app_user_home: "/var/www"
-    project_root: "/var/www/ees"
-    repo_url: "https://{{ git_username | urlencode }}:{{ git_password | urlencode }}@github.com/snbhattacharjya/ees.git"
+    app_user_home: "/home/www-data"
+    project_root: "/home/www-data/emms"
+    repo_url: "https://{{ git_username | urlencode }}:{{ git_password | urlencode }}@github.com/snbhattacharjya/emms.git"
     web_user: "{{ 'www-data' if ansible_facts['os_family'] == 'Debian' else 'nginx' if ansible_facts['os_family'] == 'RedHat' else 'http' }}"
+    app_user_shell: "{{ '/usr/sbin/nologin' if ansible_facts['os_family'] == 'Debian' else '/sbin/nologin' }}"
+    octane_host: "127.0.0.1"
+    octane_port: 8000
+    queue_workers: 2
+    supervisor_service: "{{ 'supervisor' if ansible_facts['os_family'] == 'Debian' else 'supervisord' }}"
+    supervisor_conf_dir: "{{ '/etc/supervisor/conf.d' if ansible_facts['os_family'] == 'Debian' else '/etc/supervisord.d' if ansible_facts['os_family'] == 'RedHat' else '/etc/supervisor.d' }}"
+    supervisor_conf_ext: "{{ 'conf' if ansible_facts['os_family'] == 'Debian' else 'ini' }}"
 
   become: true
   tasks:
     # ---------------------------------------------------------
-    # System Packages & PHP Setup
+    # System Packages & PHP Setup (Swoole & Supervisor)
     # ---------------------------------------------------------
     - name: Ubuntu/Debian | Install prerequisites
       ansible.builtin.apt:
-        name: [software-properties-common, ca-certificates, apt-transport-https, lsb-release, gnupg, curl, unzip, git, nginx, python3-debian]
+        name: [software-properties-common, ca-certificates, apt-transport-https, lsb-release, gnupg, curl, unzip, git, nginx, python3-debian, supervisor]
         state: present
         update_cache: yes
       when: ansible_facts['os_family'] == "Debian"
@@ -54,12 +61,11 @@
         state: present
       when: ansible_facts['distribution'] == "Debian"
 
-    - name: Ubuntu/Debian | Install PHP and extensions
+    - name: Ubuntu/Debian | Install PHP, Swoole, Supervisor and extensions
       ansible.builtin.apt:
         name:
           - "php{{ php_version }}"
           - "php{{ php_version }}-cli"
-          - "php{{ php_version }}-fpm"
           - "php{{ php_version }}-common"
           - "php{{ php_version }}-bcmath"
           - "php{{ php_version }}-bz2"
@@ -76,11 +82,24 @@
           - "php{{ php_version }}-redis"
           - "php{{ php_version }}-soap"
           - "php{{ php_version }}-sqlite3"
+          - "php{{ php_version }}-swoole"
           - "php{{ php_version }}-xml"
           - "php{{ php_version }}-zip"
+          - supervisor
         state: present
         update_cache: yes
       when: ansible_facts['os_family'] == "Debian"
+
+    - name: Ensure PHP-FPM service is stopped and disabled if present
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - "php{{ php_version }}-fpm"
+        - "php-fpm"
+      failed_when: false
+      ignore_errors: true
 
     - name: RHEL/CentOS | Install EPEL repository
       ansible.builtin.package:
@@ -104,16 +123,15 @@
         - "dnf module enable php:remi-{{ php_version }} -y"
       when: ansible_facts['os_family'] == "RedHat" and ansible_facts['distribution'] != "Fedora" and ansible_facts['pkg_mgr'] == "dnf"
 
-
-    - name: RHEL/Fedora | Install PHP, Nginx and extensions
+    - name: RHEL/Fedora | Install PHP, Nginx, Supervisor and extensions
       ansible.builtin.package:
-        name: [nginx, php, php-cli, php-fpm, php-common, php-bcmath, php-bz2, php-curl, php-gd, php-intl, php-mbstring, php-mysqlnd, php-opcache, php-pgsql, php-pecl-redis, php-pecl-imagick, php-soap, php-pdo, php-xml, php-zip, unzip, git]
+        name: [nginx, php, php-cli, php-common, php-bcmath, php-bz2, php-curl, php-gd, php-intl, php-mbstring, php-mysqlnd, php-opcache, php-pgsql, php-pecl-redis, php-pecl-imagick, php-pecl-swoole5, php-soap, php-pdo, php-xml, php-zip, supervisor, unzip, git]
         state: latest
       when: ansible_facts['os_family'] == "RedHat"
 
-    - name: Arch Linux | Install PHP, Nginx and extensions
+    - name: Arch Linux | Install PHP, Nginx, Supervisor and extensions
       ansible.builtin.package:
-        name: [nginx, php, php-fpm, php-gd, php-intl, php-pgsql, php-sqlite, php-redis, imagemagick, composer, git, unzip]
+        name: [nginx, php, php-gd, php-intl, php-pgsql, php-sqlite, php-redis, php-swoole, imagemagick, composer, git, unzip, supervisor]
         state: present
       when: ansible_facts['os_family'] == "Archlinux"
 
@@ -143,27 +161,33 @@
       when: composer_check.rc != 0
 
     # ---------------------------------------------------------
-    # User Setup & SSH Key Configuration
+    # User Setup & Directories (No login, home: /home/www-data)
     # ---------------------------------------------------------
     - name: Create App Group
       ansible.builtin.group:
         name: "{{ app_group }}"
         state: present
 
-    - name: Create App User
+    - name: Create App User with no login shell
       ansible.builtin.user:
         name: "{{ app_user }}"
         group: "{{ app_group }}"
         groups: "{{ web_user }}"
         append: yes
-        shell: /bin/bash
+        shell: "{{ app_user_shell }}"
         home: "{{ app_user_home }}"
         create_home: yes
 
-
+    - name: Ensure app user home directory has correct ownership and permissions
+      ansible.builtin.file:
+        path: "{{ app_user_home }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0755"
 
     # ---------------------------------------------------------
-    # Application Deployment (Git & Composer)
+    # Application Deployment (Git, Composer, Octane)
     # ---------------------------------------------------------
     - name: Ensure project root directory exists and has correct ownership
       ansible.builtin.file:
@@ -178,6 +202,8 @@
         repo: "{{ repo_url }}"
         dest: "{{ project_root }}"
         force: yes
+      environment:
+        HOME: "{{ app_user_home }}"
       become_user: "{{ app_user }}"
 
     - name: Install Composer Dependencies
@@ -185,8 +211,31 @@
       args:
         chdir: "{{ project_root }}"
       environment:
+        HOME: "{{ app_user_home }}"
         PATH: "/usr/local/bin:/usr/bin:/bin"
       become_user: "{{ app_user }}"
+
+    - name: Check if Laravel Octane is installed
+      ansible.builtin.shell: composer show laravel/octane
+      args:
+        chdir: "{{ project_root }}"
+      register: octane_check
+      failed_when: false
+      changed_when: false
+      environment:
+        HOME: "{{ app_user_home }}"
+        PATH: "/usr/local/bin:/usr/bin:/bin"
+      become_user: "{{ app_user }}"
+
+    - name: Require Laravel Octane if not installed
+      ansible.builtin.command: composer require laravel/octane --no-interaction
+      args:
+        chdir: "{{ project_root }}"
+      environment:
+        HOME: "{{ app_user_home }}"
+        PATH: "/usr/local/bin:/usr/bin:/bin"
+      become_user: "{{ app_user }}"
+      when: octane_check.rc != 0
 
     - name: Set correct permissions for Laravel storage and cache directories
       ansible.builtin.file:
@@ -198,7 +247,22 @@
         recurse: yes
       loop:
         - "{{ project_root }}/storage"
+        - "{{ project_root }}/storage/logs"
         - "{{ project_root }}/bootstrap/cache"
+      ignore_errors: true
+
+    - name: Ensure Laravel log files exist with correct ownership
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: touch
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: "0664"
+      loop:
+        - "{{ project_root }}/storage/logs/octane.log"
+        - "{{ project_root }}/storage/logs/worker.log"
+        - "{{ project_root }}/storage/logs/scheduler.log"
+      become_user: "{{ app_user }}"
       ignore_errors: true
 
     - name: Copy .env.example to .env
@@ -207,6 +271,15 @@
         dest: "{{ project_root }}/.env"
         remote_src: yes
         force: no
+      become_user: "{{ app_user }}"
+      ignore_errors: true
+
+    - name: Ensure OCTANE_SERVER is set to swoole in .env
+      ansible.builtin.lineinfile:
+        path: "{{ project_root }}/.env"
+        regexp: '^OCTANE_SERVER='
+        line: 'OCTANE_SERVER=swoole'
+        state: present
       become_user: "{{ app_user }}"
       ignore_errors: true
 
@@ -221,6 +294,63 @@
       ansible.builtin.command: php artisan key:generate --force
       args:
         chdir: "{{ project_root }}"
+      environment:
+        HOME: "{{ app_user_home }}"
+        PATH: "/usr/local/bin:/usr/bin:/bin"
       when: app_key_check.rc == 0
       become_user: "{{ app_user }}"
       ignore_errors: true
+
+    - name: Install Octane Swoole configuration
+      ansible.builtin.command: php artisan octane:install --server=swoole --no-interaction
+      args:
+        chdir: "{{ project_root }}"
+      environment:
+        HOME: "{{ app_user_home }}"
+        PATH: "/usr/local/bin:/usr/bin:/bin"
+      become_user: "{{ app_user }}"
+      ignore_errors: true
+
+    # ---------------------------------------------------------
+    # Supervisor Setup for Laravel (Separate files for Octane, Worker, Scheduler)
+    # ---------------------------------------------------------
+    - name: Ensure Supervisor configuration directory exists
+      ansible.builtin.file:
+        path: "{{ supervisor_conf_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Remove legacy combined supervisor configuration if present
+      ansible.builtin.file:
+        path: "{{ supervisor_conf_dir }}/emms.{{ item }}"
+        state: absent
+      loop:
+        - conf
+        - ini
+      ignore_errors: true
+
+    - name: Configure separate Supervisor program files
+      ansible.builtin.template:
+        src: "../templates/supervisor-{{ item }}.conf.j2"
+        dest: "{{ supervisor_conf_dir }}/emms-{{ item }}.{{ supervisor_conf_ext }}"
+        mode: "0644"
+      loop:
+        - octane
+        - worker
+        - scheduler
+
+    - name: Ensure Supervisor service is started and enabled
+      ansible.builtin.service:
+        name: "{{ supervisor_service }}"
+        state: started
+        enabled: true
+
+    - name: Reread and update Supervisor processes
+      ansible.builtin.command: "{{ item }}"
+      loop:
+        - "supervisorctl reread"
+        - "supervisorctl update"
+        - "supervisorctl restart emms-octane:*"
+        - "supervisorctl restart emms-worker:*"
+        - "supervisorctl restart emms-scheduler:*"
+      failed_when: false
